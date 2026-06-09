@@ -116,6 +116,8 @@ function SomaticSphere({
   const meshRef = useRef<THREE.Mesh>(null!);
   const coreRef = useRef<THREE.Mesh>(null!);
   const glowRef = useRef<THREE.Mesh>(null!);
+  const ringRef = useRef<THREE.Mesh>(null!);
+  const particlesRef = useRef<THREE.Points>(null!);
   const SCALE = 0.045;
 
   const inEpoch = selectedEpoch === undefined || selectedEpoch === 0 || node.id === 'central-me' || getEpochNumberForNode(node) === selectedEpoch;
@@ -207,7 +209,8 @@ function SomaticSphere({
     uLinksWeight: { value: 0.0 },
     uNodeType: { value: 0.0 },
     uResonances: { value: 0.0 },
-    uMaturity: { value: 1.0 }
+    uMaturity: { value: 1.0 },
+    uTension: { value: new THREE.Vector3() }
   });
 
   // Calculate dynamic parameters based on academic/somatic domain DNA
@@ -242,6 +245,7 @@ function SomaticSphere({
     shader.uniforms.uNodeType = shaderUniforms.current.uNodeType;
     shader.uniforms.uResonances = shaderUniforms.current.uResonances;
     shader.uniforms.uMaturity = shaderUniforms.current.uMaturity;
+    shader.uniforms.uTension = shaderUniforms.current.uTension;
 
     shader.vertexShader = `
       uniform float uTime;
@@ -256,6 +260,7 @@ function SomaticSphere({
       uniform float uNodeType;
       uniform float uResonances;
       uniform float uMaturity;
+      uniform vec3 uTension;
 
       vec3 rotate3D(vec3 p, float angle) {
         float s = sin(angle), c = cos(angle);
@@ -335,7 +340,10 @@ function SomaticSphere({
       `
       #include <begin_vertex>
       float dForce = getBiologicalDisplacement(position, uTime, uDnaSeed);
-      transformed += normal * dForce * (1.1 + uSelected * 0.32);
+
+      // Apply tension deformation - stretch towards tension vector
+      float stretch = dot(normal, normalize(uTension + vec3(0.0001))) * length(uTension);
+      transformed += normal * (dForce * (1.1 + uSelected * 0.32) + stretch * 0.5);
       `
     );
   }, [nodeTypeIndex, nodeMaturity]);
@@ -367,6 +375,16 @@ function SomaticSphere({
     shaderUniforms.current.uNodeType.value = nodeTypeIndex;
     shaderUniforms.current.uResonances.value = Number(node.resonances || 0);
     shaderUniforms.current.uMaturity.value = nodeMaturity;
+
+    // Calculate tension based on velocity (drag/physics)
+    const vel = new THREE.Vector3(node.vx || 0, node.vy || 0, node.vz || 0);
+    shaderUniforms.current.uTension.value.lerp(vel.multiplyScalar(0.5), 0.1);
+
+    // Apply decay factor to opacity
+    const idleDays = node.lastActiveAt ? (Date.now() - node.lastActiveAt) / (1000 * 3600 * 24) : 0;
+    const decayFactor = (node.world === 'field' && idleDays > 30) ? Math.max(0.08, Math.pow(0.95, idleDays - 30)) : 1.0;
+
+    shaderUniforms.current.uMaturity.value = nodeMaturity * decayFactor;
 
     // Soft organic breathing scale factor
     const squishX = base * breath * lodScale;
@@ -417,6 +435,17 @@ function SomaticSphere({
       coreRef.current.rotation.y = t * 0.25;
     }
 
+    if (node.id === 'central-me') {
+      if (ringRef.current) {
+        ringRef.current.scale.setScalar(base * 1.8 * (1 + Math.sin(t * 2) * 0.1) * lodScale);
+        ringRef.current.rotation.z = t * 0.5;
+      }
+      if (particlesRef.current) {
+        particlesRef.current.rotation.y = t * 0.3;
+        particlesRef.current.rotation.z = t * 0.2;
+      }
+    }
+
     meshRef.current.rotation.x = t * 0.18 + (node.breathPhase || 0);
     meshRef.current.rotation.y = t * 0.14;
 
@@ -456,6 +485,21 @@ function SomaticSphere({
     return <icosahedronGeometry args={[1.0, 5]} />;
   };
 
+  const centralMeParticles = useMemo(() => {
+    if (node.id !== 'central-me') return null;
+    const count = 40;
+    const pos = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      const r = 1.8 + Math.random() * 0.5;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.random() * Math.PI;
+      pos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+      pos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+      pos[i * 3 + 2] = r * Math.cos(phi);
+    }
+    return pos;
+  }, [node.id]);
+
   return (
     <group onClick={(e) => { e.stopPropagation(); onClick(node); }}>
       {/* Ambient Additive Glow Background */}
@@ -469,6 +513,22 @@ function SomaticSphere({
           blending={THREE.AdditiveBlending}
         />
       </mesh>
+
+      {/* Central Me exclusive visual elements */}
+      {node.id === 'central-me' && (
+        <group position={outerGroupRef.current?.position}>
+          <mesh ref={ringRef}>
+            <ringGeometry args={[1, 1.05, 64]} />
+            <meshStandardMaterial color="#DFB757" transparent opacity={0.6} side={THREE.DoubleSide} />
+          </mesh>
+          <points ref={particlesRef}>
+            <bufferGeometry>
+              <bufferAttribute attach="attributes-position" args={[centralMeParticles!, 3]} />
+            </bufferGeometry>
+            <pointsMaterial size={0.05} color="#DFB757" transparent opacity={0.8} />
+          </points>
+        </group>
+      )}
 
       {/* Living Multi-layered Cell Structure */}
       <group ref={outerGroupRef}>
@@ -923,7 +983,8 @@ function GraphScene({
   const [camDist, setCamDist] = useState(24);
   const pointer3D = usePointer3D();
 
-  const { controls, camera } = useThree() as any;
+  const controlsRef = useRef<any>(null);
+  const { camera } = useThree();
 
   // Dragging support refs
   const draggedNodeIdRef = useRef<string | null>(null);
@@ -939,8 +1000,8 @@ function GraphScene({
     const handleUp = () => {
       isPointerDownRef.current = false;
       draggedNodeIdRef.current = null;
-      if (controls) {
-        controls.enabled = true;
+      if (controlsRef.current) {
+        controlsRef.current.enabled = true;
       }
     };
     window.addEventListener('pointerdown', handleDown);
@@ -949,7 +1010,7 @@ function GraphScene({
       window.removeEventListener('pointerdown', handleDown);
       window.removeEventListener('pointerup', handleUp);
     };
-  }, [controls]);
+  }, []);
 
   const handleDragStart = (nodeId: string, node: SomaticNode, e: any) => {
     e.stopPropagation();
@@ -961,15 +1022,15 @@ function GraphScene({
     const camDir = new THREE.Vector3();
     camera.getWorldDirection(camDir);
     dragPlaneRef.current.setFromNormalAndCoplanarPoint(camDir.negate(), nodePos3D);
-    if (controls) {
-      controls.enabled = false;
+    if (controlsRef.current) {
+      controlsRef.current.enabled = false;
     }
   };
 
   const handleDragEnd = () => {
     draggedNodeIdRef.current = null;
-    if (controls) {
-      controls.enabled = true;
+    if (controlsRef.current) {
+      controlsRef.current.enabled = true;
     }
   };
 
@@ -1025,48 +1086,49 @@ function GraphScene({
 
       let tx = 0, ty = 0, tz = 0;
       if (currentWorld === 'atlas') {
-        const cxMap: Record<string, number> = { body: 70, science: -75, philosophy: -95, movement: 80, cognition: -10, hybrid: 10 };
-        const cyMap: Record<string, number> = { body: -80, science: 80, philosophy: 90, movement: -65, cognition: -70, hybrid: 85 };
-        const czMap: Record<string, number> = { body: -20, science: -15, philosophy: 10, movement: 20, cognition: 45, hybrid: -55 };
-        const cx = cxMap[n.domain] || 0;
-        const cy = cyMap[n.domain] || 0;
-        const cz = czMap[n.domain] || 0;
+        const domains: Domain[] = ['body', 'science', 'philosophy', 'movement', 'cognition', 'hybrid'];
+        const domainIndex = domains.indexOf(n.domain);
+        const baseAngle = (domainIndex * Math.PI * 2) / domains.length;
 
-        if (x === undefined || y === undefined || z === undefined) {
-          x = cx + (Math.random() - 0.5) * 30;
-          y = cy + (Math.random() - 0.5) * 30;
-          z = cz + (Math.random() - 0.5) * 30;
-        }
+        let dist = 0;
+        let zRange = 0;
 
         if (n.level === 'macro') {
-          tx = cx + Math.sin(idx) * 4;
-          ty = cy + Math.cos(idx) * 4;
-          tz = cz + Math.sin(idx * 2) * 4;
+          dist = 100;
+          zRange = 8;
         } else if (n.level === 'meso') {
-          const localDist = 28 + (idx % 4) * 6;
-          const theta = (idx * 1.5) % Math.PI;
-          const phi = (idx * 2.3) % (Math.PI * 2);
-          tx = cx + Math.sin(theta) * Math.cos(phi) * localDist;
-          ty = cy + Math.sin(theta) * Math.sin(phi) * localDist;
-          tz = cz + Math.cos(theta) * localDist;
+          dist = 160;
+          zRange = 15;
         } else {
-          const localDist = 58 + (idx % 6) * 6;
-          const theta = (idx * 1.8) % Math.PI;
-          const phi = (idx * 2.7) % (Math.PI * 2);
-          tx = cx + Math.sin(theta) * Math.cos(phi) * localDist;
-          ty = cy + Math.sin(theta) * Math.sin(phi) * localDist;
-          tz = cz + Math.cos(theta) * localDist;
+          dist = 220;
+          zRange = 25;
+        }
+
+        // Spread nodes slightly within their domain "sector"
+        const angleOffset = (Math.sin(idx * 0.5) * 0.3);
+        const finalAngle = baseAngle + angleOffset;
+        const radialOffset = (Math.cos(idx * 0.7) * 15);
+        const finalDist = dist + radialOffset;
+
+        tx = Math.cos(finalAngle) * finalDist;
+        ty = Math.sin(finalAngle) * finalDist;
+        tz = (Math.sin(idx * 1.3) * zRange);
+
+        if (x === undefined || y === undefined || z === undefined) {
+          x = tx + (Math.random() - 0.5) * 20;
+          y = ty + (Math.random() - 0.5) * 20;
+          z = tz + (Math.random() - 0.5) * 10;
         }
       } else if (currentWorld === 'field') {
-        const angle = (idx * 0.72) % (Math.PI * 2);
-        const dist = 40 + (idx % 12) * 22;
-        tx = Math.cos(angle) * dist;
-        ty = Math.sin(angle) * dist * 0.6;
-        tz = Math.cos(idx * 3) * 10;
+        // Organic cloud, slightly flattened
+        const angle = (idx * 137.5 * Math.PI) / 180; // Golden angle
+        const r = Math.sqrt(idx) * 25;
+        tx = Math.cos(angle) * r;
+        ty = Math.sin(angle) * r;
+        tz = (Math.random() - 0.5) * 40; // Spatially flattened
+
         if (x === undefined || y === undefined || z === undefined) {
-          x = tx + (Math.random() - 0.5) * 15;
-          y = ty + (Math.random() - 0.5) * 15;
-          z = tz + (Math.random() - 0.5) * 10;
+          x = tx; y = ty; z = tz;
         }
       } else {
         if (n.id === 'central-me') {
@@ -1090,7 +1152,7 @@ function GraphScene({
       const levelFactor = lvl === 'macro' ? 1.6 : lvl === 'meso' ? 1.1 : 0.7;
       const stat = n.status || 'seed';
       const statusFactor = stat === 'rooted' || stat === 'atlas' ? 1.5 : stat === 'alive' ? 1.25 : stat === 'sprout' ? 0.95 : 0.7;
-      const bRad = (n.id === 'central-me') ? 18 : Math.round(11 * levelFactor * statusFactor);
+      const bRad = (n.id === 'central-me') ? 22 : Math.round(11 * levelFactor * statusFactor);
 
       return {
         ...n,
@@ -1266,7 +1328,8 @@ function GraphScene({
             const dynamicRestDistance = baseCombinedRadius * 1.65 + Math.sin(time * 0.8 + i) * 3.0;
 
             const delta = dist - dynamicRestDistance;
-            let forceStrength = delta * springStrength * Math.log(link.resonanceWeight + 1);
+            // Elastic spring force: pulls if dist > rest, pushes if dist < rest
+            let forceStrength = delta * springStrength * Math.log(link.resonanceWeight + 1.5);
 
             // Anti-collapse safeguard: if nodes are physically closer than their combined cell envelopes,
             // we smoothly nullify any positive (pulling/attractive) force to keep separation in charge!
@@ -1350,17 +1413,17 @@ function GraphScene({
       n1.currentRadius = (n1.baseRadius || 10) * (1 + Math.sin(bp) * 0.08);
     }
 
-    if (selectedNodeId && controls) {
+    if (selectedNodeId && controlsRef.current) {
       const selNode = nodesList.find(n => n.id === selectedNodeId);
       if (selNode) {
         const tx = (selNode.x || 0) * SCALE;
         const ty = (selNode.y || 0) * SCALE;
         const tz = (selNode.z || 0) * SCALE;
-        controls.target.x += (tx - controls.target.x) * 0.09;
-        controls.target.y += (ty - controls.target.y) * 0.09;
-        controls.target.z += (tz - controls.target.z) * 0.09;
+        controlsRef.current.target.x += (tx - controlsRef.current.target.x) * 0.09;
+        controlsRef.current.target.y += (ty - controlsRef.current.target.y) * 0.09;
+        controlsRef.current.target.z += (tz - controlsRef.current.target.z) * 0.09;
       }
-    } else if (controls && nodesList.length > 0) {
+    } else if (controlsRef.current && nodesList.length > 0) {
       // Dynamic collective center of mass of all nodes determines index center relative to them!
       const activeNodes = nodesList.filter(n => n.id !== 'central-me' || nodesList.length === 1);
       const targetNodes = activeNodes.length > 0 ? activeNodes : nodesList;
@@ -1376,9 +1439,9 @@ function GraphScene({
       const avgZ = (sumZ / targetNodes.length) * SCALE;
 
       // Smoothly drift target to center of mass
-      controls.target.x += (avgX - controls.target.x) * 0.04;
-      controls.target.y += (avgY - controls.target.y) * 0.04;
-      controls.target.z += (avgZ - controls.target.z) * 0.04;
+      controlsRef.current.target.x += (avgX - controlsRef.current.target.x) * 0.04;
+      controlsRef.current.target.y += (avgY - controlsRef.current.target.y) * 0.04;
+      controlsRef.current.target.z += (avgZ - controlsRef.current.target.z) * 0.04;
     }
 
     // Физика отталкивания на уровне пользовательских созвездий
@@ -1513,7 +1576,7 @@ function GraphScene({
       <pointLight position={[-15, -8, -15]} intensity={1.7} color="#9977ee" />
       <pointLight position={[8, -10, 8]} intensity={1.2} color="#7755aa" />
 
-      <OrbitControls
+      <OrbitControls ref={controlsRef}
         enableZoom={true}
         enablePan={true}
         enableRotate={true}

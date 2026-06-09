@@ -15,6 +15,7 @@ import ConceptDetails from './components/ConceptDetails';
 import AddSenseModal from './components/AddSenseModal';
 import CommunityAgenda from './components/CommunityAgenda';
 import UserProfile from './components/UserProfile';
+import RadialMenu from './components/RadialMenu';
 
 // Icons
 import {
@@ -26,10 +27,16 @@ import {
 export default function App() {
   // Persistence states
   const [nodes, setNodes] = useState<SomaticNode[]>(INITIAL_NODES);
+  const [ascendingNodeId, setAscendingNodeId] = useState<string | null>(null);
   const [links, setLinks] = useState<SomaticLink[]>(INITIAL_LINKS);
   const [users, setUsers] = useState<CommunityUser[]>(INITIAL_USERS);
   const [questions, setQuestions] = useState<CommunityQuestion[]>(INITIAL_QUESTIONS);
   const [activities, setActivities] = useState<ActivityLog[]>(INITIAL_ACTIVITIES);
+
+  useEffect(() => {
+    const initialStories: Story[] = INITIAL_NODES.flatMap(n => (n.stories || []).map(s => ({...s, nodeId: n.id})));
+    setStories(initialStories);
+  }, []);
 
   // Global settings
   const [currentWorld, setCurrentWorld] = useState<World>('atlas');
@@ -44,6 +51,9 @@ export default function App() {
   const [activePanel, setActivePanel] = useState<'card' | 'audio' | 'profile' | 'agenda' | null>('card');
   const [isMobilePanelOpen, setIsMobilePanelOpen] = useState(false);
   const [isZenMode, setIsZenMode] = useState(false); // Collapses all sidebars for pure 3D canvas interaction on phones
+  const [stories, setStories] = useState<Story[]>([]);
+  const [showHints, setShowHints] = useState(false);
+  const [fieldMode, setFieldMode] = useState<'graph' | 'stream'>('graph');
 
   // Search overlay state
   const [searchQuery, setSearchQuery] = useState('');
@@ -275,10 +285,25 @@ export default function App() {
   const handleResonateNode = (id: string) => {
     setNodes(prev => prev.map(n => {
       if (n.id === id) {
+        const resonances = n.resonances + 1;
+        const score = Math.log10(Math.max(resonances * 1 + (n.connectionsCount || 0) * 5 + (n.carriesCount || 0) * 3 + (n.stories?.length || 0) * 2, 1));
+        let status = n.status;
+        if (status !== 'atlas') {
+          if (score >= 2) status = 'rooted'; // log10(100) = 2
+          else if (score >= 1.7) status = 'alive'; // log10(50) = ~1.7
+          else if (score >= 1) status = 'sprout'; // log10(10) = 1
+        }
+        if (status !== n.status && status === 'rooted') {
+          setAscendingNodeId(id);
+          setTimeout(() => setAscendingNodeId(null), 3000);
+        }
         return {
           ...n,
-          resonances: n.resonances + 1,
-          trajectory: 'growing'
+          resonances,
+          score,
+          status,
+          trajectory: 'growing',
+          lastActiveAt: Date.now()
         };
       }
       return n;
@@ -311,7 +336,26 @@ export default function App() {
   const handlePocketNode = (id: string) => {
     setNodes(prev => prev.map(n => {
       if (n.id === id) {
-        return { ...n, carriesCount: (n.carriesCount || 0) + 1 };
+        const carriesCount = (n.carriesCount || 0) + 1;
+        const score = Math.log10(Math.max(n.resonances * 1 + (n.connectionsCount || 0) * 5 + carriesCount * 3 + (n.stories?.length || 0) * 2, 1));
+        let status = n.status;
+        if (status !== 'atlas') {
+          if (score >= 2) status = 'rooted';
+          else if (score >= 1.7) status = 'alive';
+          else if (score >= 1) status = 'sprout';
+        }
+        if (status !== n.status && status === 'rooted') {
+          setAscendingNodeId(id);
+          setTimeout(() => setAscendingNodeId(null), 3000);
+        }
+        return {
+          ...n,
+          carriesCount,
+          score,
+          status,
+          trajectory: 'growing',
+          lastActiveAt: Date.now()
+        };
       }
       return n;
     }));
@@ -339,19 +383,36 @@ export default function App() {
 
   // Add Story Log Action
   const handleAddStory = (id: string, text: string) => {
+    const newStory: Story = {
+      id: `story-${Date.now()}`,
+      author: currentUser.name,
+      text,
+      createdAt: Date.now()
+    };
+
+    setStories(prev => [newStory, ...prev]);
+
     setNodes(prev => prev.map(n => {
       if (n.id === id) {
-        const storiesList = n.stories || [];
-        const newStory: Story = {
-          id: `story-${Date.now()}`,
-          author: currentUser.name,
-          text,
-          createdAt: Date.now()
-        };
+        const storiesCount = (n.storiesCount || 0) + 1;
+        const score = Math.log10(Math.max(n.resonances * 1 + (n.connectionsCount || 0) * 5 + (n.carriesCount || 0) * 3 + storiesCount * 2, 1));
+        let status = n.status;
+        if (status !== 'atlas') {
+          if (score >= 2) status = 'rooted';
+          else if (score >= 1.7) status = 'alive';
+          else if (score >= 1) status = 'sprout';
+        }
+        if (status !== n.status && status === 'rooted') {
+          setAscendingNodeId(id);
+          setTimeout(() => setAscendingNodeId(null), 3000);
+        }
         return {
           ...n,
-          stories: [newStory, ...storiesList],
-          trajectory: 'growing'
+          storiesCount,
+          score,
+          status,
+          trajectory: 'growing',
+          lastActiveAt: Date.now()
         };
       }
       return n;
@@ -395,6 +456,32 @@ export default function App() {
     };
 
     setLinks(prev => [...prev, newLink]);
+
+    setNodes(prev => prev.map(n => {
+      if (n.id === source || n.id === target) {
+        const connectionsCount = (n.connectionsCount || 0) + 1;
+        const score = Math.log10(Math.max(n.resonances * 1 + connectionsCount * 5 + (n.carriesCount || 0) * 3 + (n.stories?.length || 0) * 2, 1));
+        let status = n.status;
+        if (status !== 'atlas') {
+          if (score >= 2) status = 'rooted';
+          else if (score >= 1.7) status = 'alive';
+          else if (score >= 1) status = 'sprout';
+        }
+        if (status !== n.status && status === 'rooted') {
+          setAscendingNodeId(n.id);
+          setTimeout(() => setAscendingNodeId(null), 3000);
+        }
+        return {
+          ...n,
+          connectionsCount,
+          score,
+          status,
+          trajectory: 'growing',
+          lastActiveAt: Date.now()
+        };
+      }
+      return n;
+    }));
 
     const srcNode = nodes.find(n => n.id === source);
     const tNode = nodes.find(n => n.id === target);
@@ -513,6 +600,18 @@ export default function App() {
     setIsLoggedOut(false);
     setCurrentUser(INITIAL_USERS[0]); // Roman Botov botovroman45@gmail.com
   };
+
+  useEffect(() => {
+    const hintsShown = localStorage.getItem('su_hints_shown');
+    if (!hintsShown) {
+      setShowHints(true);
+      const timer = setTimeout(() => {
+        setShowHints(false);
+        localStorage.setItem('su_hints_shown', 'true');
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, []);
 
   const selectedNode = nodes.find(n => n.id === selectedNodeId);
   const selectedAudio = SAMPLE_AUDIO[currentAudioIndex];
@@ -665,6 +764,7 @@ export default function App() {
               <ConceptDetails
                 node={selectedNode}
                 links={links}
+                stories={stories}
                 allNodes={nodes}
                 language={language}
                 onSelectNode={(id) => setSelectedNodeId(id)}
@@ -802,97 +902,70 @@ export default function App() {
       </aside>
 
       {/* DETACHED MAIN VISUAL CANVAS WRAPPER */}
-      <main className={`grow flex flex-col relative h-full overflow-hidden bg-[#050508] transition-all duration-300 ${activePanel ? 'md:mr-[420px]' : ''}`}>
+      <main className={`grow flex flex-col relative h-full overflow-hidden bg-[#050508] transition-all duration-300 ${activePanel && mobileCardState === 'expanded' ? 'md:mr-[420px]' : ''}`}>
         
         {/* TOP HUD BAR - NAVIGATION SEARCH & AUDIO */}
-        <header className="absolute top-4 left-4 right-4 z-10 pointer-events-none flex justify-between gap-3 items-center select-none">
+        <header className="absolute top-6 left-6 right-6 z-35 pointer-events-none flex justify-between items-start select-none">
           
-          {/* LEFT PORTION HUD: AVATAR & LANGUAGE SELECTOR */}
-          <div className="flex gap-2 pointer-events-auto">
+          {/* LEFT PORTION HUD: AVATAR & ZEN (MINIMAL) */}
+          <div className="flex gap-4 pointer-events-auto">
             {/* AVATAR PROFILE BUTTON TRIGGER (TOP LEFT HUD) */}
             <button
               onClick={() => setActivePanel(activePanel === 'profile' ? null : 'profile')}
               id="avatar-hud-trigger-btn"
-              className="p-1 px-1.5 bg-slate-950/80 backdrop-blur-md rounded-xl border border-white/10 text-white flex items-center gap-2 hover:bg-slate-900 active:scale-95 transition cursor-pointer"
+              className="w-10 h-10 bg-slate-950/80 backdrop-blur-md rounded-full border border-white/10 text-white flex items-center justify-center hover:bg-slate-900 active:scale-95 transition cursor-pointer shadow-xl"
               title="UserProfile panel"
             >
-              <div className="w-7 h-7 rounded-lg bg-teal-500/10 border border-teal-500/30 flex items-center justify-center font-mono font-black text-teal-400 text-xs">
+              <div className="w-7 h-7 rounded-full bg-teal-500/10 border border-teal-500/30 flex items-center justify-center font-mono font-black text-teal-400 text-xs">
                 {currentUser.name ? currentUser.name[0].toUpperCase() : 'U'}
               </div>
-              <span className="text-[10px] font-mono uppercase tracking-widest text-slate-300 hidden sm:inline-block mr-1">{currentUser.name}</span>
-            </button>
-
-            {/* ZEN OVERVIEW MODE TOGGLE */}
-            <button
-              onClick={() => setIsZenMode(!isZenMode)}
-              id="zen-trigger-btn"
-              className="p-2.5 bg-slate-950/80 backdrop-blur-md rounded-xl border border-white/10 text-slate-300 hover:text-white shrink-0 active:scale-95 transition cursor-pointer flex items-center gap-1.5"
-              title="Zen view toggler"
-            >
-              <Eye className={`w-4 h-4 ${isZenMode ? 'text-indigo-400' : ''}`} />
-              <span className="text-[10px] font-mono uppercase tracking-wider hidden sm:inline ">{isZenMode ? 'Show HUD' : 'Zen View'}</span>
-            </button>
-
-            {/* SENSE MODAL SPAWNER TRIGGER */}
-            <button
-              onClick={() => setIsAddSenseOpen(true)}
-              id="sense-modal-trigger-btn"
-              className="p-2 bg-indigo-600/90 hover:bg-indigo-500 text-white rounded-xl border border-white/10 shadow-lg shadow-indigo-500/10 px-3.5 flex items-center gap-1.5 transition active:scale-95 select-none cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
-              <span className="text-[10px] font-mono tracking-widest font-black uppercase text-[9.5px] hidden sm:inline">{language === 'ru' ? 'Впрыск' : 'Add Sense'}</span>
             </button>
           </div>
 
-          {/* RIGHT PORTION HUD: VIBE MODE SELECTION & SEISMIC CURTAIN INDICATOR */}
-          <div className="flex gap-2 pointer-events-auto select-none grow sm:grow-0 justify-end">
-            
-            {/* DYNAMIC FILTERS CURTAIN BUTTON (TOP RIGHT HUD) */}
-            <button
-              onClick={() => setShowMobileFilter(!showMobileFilter)}
-              id="filters-curtain-trigger-btn"
-              className="p-2.5 bg-slate-950/80 backdrop-blur-md rounded-xl border border-white/10 text-slate-350 hover:bg-slate-900 active:scale-95 transition cursor-pointer flex items-center gap-1.5"
-              title="Seismic Filters Dropdown Curtain"
-            >
-              <Sliders className="w-4 h-4 text-indigo-400" />
-              <span className="text-[9.5px] font-mono uppercase tracking-wider hidden md:inline-block font-extrabold">{language === 'ru' ? 'Светофильтр' : 'Filters'}</span>
-            </button>
-
+          {/* RIGHT PORTION HUD: FILTERS & LANGUAGE (MINIMAL) */}
+          <div className="flex gap-4 pointer-events-auto select-none">
             {/* LANGUAGE TOGGLER CAPSULE */}
             <button
               onClick={() => setLanguage(l => l === 'ru' ? 'en' : 'ru')}
-              className="p-2 px-3 bg-slate-950/80 backdrop-blur-md text-[10px] font-mono font-extrabold text-white uppercase rounded-xl border border-white/10 hover:bg-slate-900 cursor-pointer active:scale-95 transition"
+              className="w-10 h-10 bg-slate-950/80 backdrop-blur-md text-[10px] font-mono font-black text-white uppercase rounded-full border border-white/10 hover:bg-slate-900 cursor-pointer active:scale-95 transition flex items-center justify-center shadow-xl"
               title="Change Language"
             >
               {language === 'ru' ? 'EN' : 'RU'}
             </button>
 
-            {/* VIBE FILTERS FOR 3D */}
-            <div className="bg-slate-950/80 backdrop-blur-md p-1 rounded-xl border border-white/5 shadow-xl flex gap-1 font-mono text-[10px] hidden sm:flex">
-              <button
-                onClick={() => setVibeMode('colour')}
-                className={`px-2.5 py-1.5 rounded-lg transition cursor-pointer ${
-                  vibeMode === 'colour' ? 'bg-indigo-600/30 text-white font-bold' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Color
-              </button>
-              <button
-                onClick={() => setVibeMode('mono')}
-                className={`px-2.5 py-1.5 rounded-lg transition cursor-pointer ${
-                  vibeMode === 'mono' ? 'bg-indigo-600/30 text-white font-bold' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Mono
-              </button>
-            </div>
-
+            {/* DYNAMIC FILTERS CURTAIN BUTTON (TOP RIGHT HUD) */}
+            <button
+              onClick={() => setShowMobileFilter(!showMobileFilter)}
+              id="filters-curtain-trigger-btn"
+              className="w-10 h-10 bg-slate-950/80 backdrop-blur-md rounded-full border border-white/10 text-slate-350 hover:bg-slate-900 active:scale-95 transition cursor-pointer flex items-center justify-center shadow-xl"
+              title="Seismic Filters Dropdown Curtain"
+            >
+              <Sliders className="w-4 h-4 text-indigo-400" />
+            </button>
           </div>
 
         </header>
 
+        {/* FIELD MODE TABS (ONLY IN FIELD WORLD) */}
+        {currentWorld === 'field' && (
+          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-20 bg-slate-950/80 backdrop-blur-md p-1 rounded-xl border border-white/5 flex gap-1 shadow-2xl">
+            <button
+              onClick={() => setFieldMode('graph')}
+              className={`px-4 py-1.5 rounded-lg text-[10px] font-mono font-black transition-all cursor-pointer ${fieldMode === 'graph' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+              {language === 'ru' ? 'ГРАФ' : 'GRAPH'}
+            </button>
+            <button
+              onClick={() => setFieldMode('stream')}
+              className={`px-4 py-1.5 rounded-lg text-[10px] font-mono font-black transition-all cursor-pointer ${fieldMode === 'stream' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+              {language === 'ru' ? 'ПОТОК' : 'STREAM'}
+            </button>
+          </div>
+        )}
+
         {/* 3D GRAPH CANVAS VISUALIZER COMPONENT */}
-        <div className="grow w-full h-full relative z-0">
+        <div className={`grow w-full h-full relative z-0 ${currentWorld === 'field' && fieldMode === 'stream' ? 'hidden' : 'block'}`}>
           <MyceliumGraph
             nodes={filteredNodes}
             links={links}
@@ -907,13 +980,50 @@ export default function App() {
             activeAudioNodeId={activeAudioNodeId}
             selectedEpoch={selectedEpoch}
             vibeMode={vibeMode}
-            ascendingNodeId={customAscendingNode}
+            ascendingNodeId={ascendingNodeId || customAscendingNode}
             communityUsers={users}
             fieldSubMode="ideas"
             onUserSelect={() => {}}
             onLongPressNode={handleLongPressNode}
           />
         </div>
+
+        {/* FIELD STREAM MODE COMPONENT */}
+        {currentWorld === 'field' && fieldMode === 'stream' && (
+          <div className="grow w-full h-full overflow-y-auto custom-scrollbar bg-[#050508] p-6 pt-36">
+            <div className="max-w-2xl mx-auto flex flex-col gap-6">
+              {filteredNodes.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).map(node => (
+                <motion.div
+                  key={node.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  onClick={() => { setSelectedNodeId(node.id); setActivePanel('card'); setMobileCardState('minimized'); }}
+                  className="bg-slate-900/40 border border-white/5 rounded-2xl p-5 hover:border-white/10 transition-all cursor-pointer group"
+                >
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: DOMAIN_COLORS[node.domain] }} />
+                      <span className="text-[10px] font-mono uppercase font-black text-slate-500">{node.domain}</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-600">{new Date(node.createdAt || Date.now()).toLocaleDateString()}</span>
+                  </div>
+                  <h3 className="text-lg font-bold text-white mb-2 group-hover:text-indigo-400 transition-colors">{language === 'ru' ? node.nameRu : node.nameEn}</h3>
+                  <p className="text-xs text-slate-400 leading-relaxed line-clamp-3 mb-4">{language === 'ru' ? node.descriptionRu : node.descriptionEn}</p>
+                  <div className="flex gap-4 border-t border-white/5 pt-4">
+                    <div className="flex items-center gap-1.5 text-amber-500">
+                      <Flame className="w-3.5 h-3.5" />
+                      <span className="text-[10px] font-mono font-black">{node.resonances}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-indigo-400">
+                      <Plus className="w-3.5 h-3.5" />
+                      <span className="text-[10px] font-mono font-black">{node.connectionsCount || 0}</span>
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* COMPACT FLOATING AUDIO & CHRONO HUD (BOTTOM LEFT) */}
         <footer 
@@ -1029,11 +1139,11 @@ export default function App() {
         {/* ==========================================
             UNIFIED BOTTOM DOCK HUD (ALL SCREENS)
             ========================================== */}
-        <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 z-35 pointer-events-none flex items-center gap-3 select-none transition-all duration-300 ${
+        <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 z-35 pointer-events-none flex items-center gap-6 select-none transition-all duration-300 ${
           isZenMode ? 'translate-y-28 opacity-0 scale-95' : 'translate-y-0 opacity-100'
-        } ${activePanel ? 'hidden md:flex' : 'flex'}`}>
-          {/* ATLAS • FIELD • ME world switching capsule */}
-          <div className="pointer-events-auto bg-slate-950/95 border border-white/10 backdrop-blur-md p-1.5 px-2.5 rounded-full shadow-2xl flex items-center gap-1.5">
+        }`}>
+          {/* ATLAS ● FIELD ● ME world switching navigation dots */}
+          <div className="pointer-events-auto bg-slate-950/90 border border-white/10 backdrop-blur-md p-2 px-4 rounded-full shadow-2xl flex items-center gap-4">
             {([
               { id: 'atlas', label: 'ATLAS' },
               { id: 'field', label: 'FIELD' },
@@ -1046,132 +1156,78 @@ export default function App() {
                   onClick={() => {
                     setCurrentWorld(w.id);
                     setActivePanel(null); // Close active panels on world switch
-                    if (w.id === 'atlas') {
-                      setSelectedNodeId('soma-hanna');
-                    } else if (w.id === 'field') {
-                      setSelectedNodeId('field-gaze');
-                    } else if (w.id === 'me') {
-                      setSelectedNodeId('central-me');
-                    }
+                    if (w.id === 'atlas') setSelectedNodeId('soma-hanna');
+                    else if (w.id === 'field') setSelectedNodeId('field-gaze');
+                    else if (w.id === 'me') setSelectedNodeId('central-me');
                   }}
-                  className={`px-3.5 py-1.5 rounded-full text-[9.5px] font-mono tracking-widest font-black transition-all cursor-pointer ${
-                    isActive 
-                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' 
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
+                  className="flex items-center justify-center p-1 cursor-pointer group"
+                  title={w.label}
                 >
-                  {w.label}
+                  <div className={`w-2.5 h-2.5 rounded-full transition-all duration-300 ${
+                    isActive ? 'bg-indigo-500 scale-125 shadow-[0_0_10px_#6366f1]' : 'bg-slate-600 hover:bg-slate-400'
+                  }`} />
                 </button>
               );
             })}
-          </div>
 
-          {/* ADD SENSE PLUS BUTTON */}
-          <button
-            onClick={() => setIsAddSenseOpen(true)}
-            className="pointer-events-auto w-10 h-10 rounded-full bg-indigo-600 hover:bg-indigo-500 border border-white/10 shadow-2xl flex items-center justify-center text-white active:scale-95 transition cursor-pointer"
-            title="Add Sense (+)"
-          >
-            <Plus className="w-5 h-5" />
-          </button>
+            {/* ADD SENSE PLUS BUTTON (Inline with navigation) */}
+            <button
+              onClick={() => setIsAddSenseOpen(true)}
+              className="w-8 h-8 rounded-full bg-indigo-600 hover:bg-indigo-500 border border-white/10 shadow-lg flex items-center justify-center text-white active:scale-90 transition-all cursor-pointer ml-1"
+              title="Add Sense (+)"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          </div>
         </div>
+
+        {/* TEMPORARY CONTROL HINTS */}
+        <AnimatePresence>
+          {showHints && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="absolute bottom-24 left-1/2 -translate-x-1/2 z-40 pointer-events-none"
+            >
+              <div className="bg-slate-900/90 border border-white/10 backdrop-blur-md px-6 py-3 rounded-2xl shadow-2xl text-center">
+                <p className="text-[10px] font-mono tracking-widest text-indigo-300 uppercase font-black">
+                  {language === 'ru'
+                    ? 'Зажми узел для меню • Свайп вверх для деталей'
+                    : 'Long press node for menu • Swipe up for details'}
+                </p>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
 
 
         {/* ==========================================
-            MOBILE RADIAL MENU (LONG PRESS ACTION)
+            UNIFIED RADIAL MENU (LONG PRESS ACTION)
             ========================================== */}
         {radialMenu && (
-          <div 
-            className="md:hidden fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px] animate-fade-in"
-            onClick={() => setRadialMenu(null)}
-          >
-            <div 
-              className="absolute z-50 pointer-events-auto"
-              style={{ 
-                top: `${radialMenu.y}px`, 
-                left: `${radialMenu.x}px`,
-                transform: 'translate(-50%, -50%)' 
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Central selected node ring anchor */}
-              <div 
-                className="w-14 h-14 bg-slate-900 border-2 rounded-full flex items-center justify-center shadow-2xl relative select-none"
-                style={{ borderColor: DOMAIN_COLORS[radialMenu.node.domain] || '#DFB757' }}
-              >
-                <div 
-                  className="w-8 h-8 rounded-full opacity-40 animate-ping absolute"
-                  style={{ backgroundColor: DOMAIN_COLORS[radialMenu.node.domain] || '#DFB757' }}
-                />
-                <span className="text-[9.5px] font-mono font-black text-white text-center tracking-tighter">
-                  {language === 'ru' ? radialMenu.node.nameRu.slice(0, 4) : radialMenu.node.nameEn.slice(0, 4)}
-                </span>
-              </div>
-
-              {/* ACTION 1: SONIFY / LISTENING (Top/North) */}
-              <div style={{ position: 'absolute', top: '-75px', left: '0px', transform: 'translateX(-50%)' }}>
-                <button
-                  onClick={() => {
-                    setActiveAudioNodeId(radialMenu.node.id);
-                    setIsPlayingAudio(!isPlayingAudio);
-                    setRadialMenu(null);
-                  }}
-                  className={`w-11 h-11 rounded-full flex items-center justify-center shadow-lg border transitionactive:scale-95 cursor-pointer bg-slate-950/90 ${
-                    activeAudioNodeId === radialMenu.node.id && isPlayingAudio
-                      ? 'border-indigo-400 text-indigo-300' 
-                      : 'border-white/10 text-slate-300 hover:text-white'
-                  }`}
-                  title={language === 'ru' ? 'Слушать концепт' : 'Sonify Concept'}
-                >
-                  <Volume2 className="w-4.5 h-4.5" />
-                </button>
-              </div>
-
-              {/* ACTION 2: CARRY TO POCKET (Right/East) */}
-              <div style={{ position: 'absolute', top: '0px', left: '75px', transform: 'translateY(-50%)' }}>
-                <button
-                  onClick={() => {
-                    handlePocketNode(radialMenu.node.id);
-                    setRadialMenu(null);
-                  }}
-                  className="w-11 h-11 rounded-full flex items-center justify-center shadow-lg border border-white/10 hover:border-emerald-400 hover:text-emerald-300 text-slate-300 bg-slate-950/90 transition active:scale-95 cursor-pointer"
-                  title={language === 'ru' ? 'В карман' : 'Pocket Landmark'}
-                >
-                  <Pocket className="w-4.5 h-4.5" />
-                </button>
-              </div>
-
-              {/* ACTION 3: RESONATE CORE (Bottom/South) */}
-              <div style={{ position: 'absolute', top: '75px', left: '0px', transform: 'translateX(-50%)' }}>
-                <button
-                  onClick={() => {
-                    handleResonateNode(radialMenu.node.id);
-                    setRadialMenu(null);
-                  }}
-                  className="w-11 h-11 rounded-full flex items-center justify-center shadow-lg border border-white/10 hover:border-amber-400 hover:text-amber-300 text-slate-300 bg-slate-950/90 transition active:scale-95 cursor-pointer"
-                  title={language === 'ru' ? 'Резонанс' : 'Resonate Core'}
-                >
-                  <Flame className="w-4.5 h-4.5" />
-                </button>
-              </div>
-
-              {/* ACTION 4: CONNECT / LINK (Left/West) */}
-              <div style={{ position: 'absolute', top: '0px', left: '-75px', transform: 'translateY(-50%)' }}>
-                <button
-                  onClick={() => {
-                    setMobileCardState('expanded');
-                    setMobileCardTab('map');
-                    setRadialMenu(null);
-                  }}
-                  className="w-11 h-11 rounded-full flex items-center justify-center shadow-lg border border-white/10 hover:border-indigo-400 hover:text-indigo-300 text-slate-300 bg-slate-950/90 transition active:scale-95 cursor-pointer"
-                  title={language === 'ru' ? 'Связать' : 'Connect Flows'}
-                >
-                  <Plus className="w-4.5 h-4.5" />
-                </button>
-              </div>
-            </div>
-          </div>
+          <RadialMenu
+            node={radialMenu.node}
+            x={radialMenu.x}
+            y={radialMenu.y}
+            language={language}
+            onClose={() => setRadialMenu(null)}
+            onAction={(action) => {
+              if (action === 'resonate') handleResonateNode(radialMenu.node.id);
+              if (action === 'carry') handlePocketNode(radialMenu.node.id);
+              if (action === 'link') {
+                setActivePanel('card');
+                setMobileCardState('expanded');
+                setMobileCardTab('map');
+              }
+              if (action === 'story') {
+                setActivePanel('card');
+                setMobileCardState('expanded');
+                setMobileCardTab('stories');
+              }
+            }}
+          />
         )}
 
         {/* ==========================================
@@ -1180,7 +1236,7 @@ export default function App() {
         {activePanel && (
           <div 
             className={`md:hidden fixed inset-x-0 bottom-0 z-30 bg-slate-950/95 border-t border-white/10 rounded-t-3xl shadow-2xl transition-all duration-300 overflow-hidden flex flex-col ${
-              mobileCardState === 'expanded' ? 'h-[75vh]' : 'h-[250px]'
+              mobileCardState === 'expanded' ? 'h-[90vh]' : mobileCardState === 'minimized' ? 'h-[30vh]' : 'h-0'
             }`}
             onTouchStart={handleTouchStart}
             onTouchEnd={(e) => handleTouchEnd(e, {

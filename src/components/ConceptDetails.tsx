@@ -4,12 +4,14 @@ import { SomaticNode, SomaticLink, Story, Material } from '../types';
 import { DOMAIN_COLORS } from './MyceliumGraph';
 import { 
   Flame, Heart, History, BookOpen, ExternalLink, 
-  ChevronRight, Compass, Volume2, Pocket, Plus, Sparkles, AlertCircle, Share2
+  ChevronRight, Compass, Volume2, Pocket, Plus, Sparkles, AlertCircle, Share2,
+  ArrowUpRight
 } from 'lucide-react';
 
 interface ConceptDetailsProps {
   node: SomaticNode;
   links: SomaticLink[];
+  stories: Story[];
   allNodes: SomaticNode[];
   language: 'ru' | 'en';
   onSelectNode: (nodeId: string) => void;
@@ -26,6 +28,7 @@ interface ConceptDetailsProps {
 export default function ConceptDetails({
   node,
   links,
+  stories,
   allNodes,
   language,
   onSelectNode,
@@ -159,21 +162,70 @@ export default function ConceptDetails({
         )}
       </div>
 
-      {/* 3. RAPID QUICK ACTION PANEL */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-black/30 p-1.5 rounded-xl border border-white/5">
+      {/* 3. CONCEPT HEALTH & EVOLUTION */}
+      <div className="bg-black/30 border border-white/5 rounded-2xl p-4 flex flex-col gap-3">
+        <div className="flex justify-between items-center text-[10px] font-mono text-slate-500 uppercase font-black">
+          <span>{language === 'ru' ? 'Состояние концепта' : 'Concept Health'}</span>
+          <span className="text-indigo-400">{node.status}</span>
+        </div>
+
+        {/* Progress bars for Health metrics */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-3">
+            <Flame className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+            <div className="grow h-1.5 bg-white/5 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-amber-500 transition-all duration-1000"
+                style={{ width: `${Math.min(100, (node.resonances / 100) * 100)}%` }}
+              />
+            </div>
+            <span className="text-[10px] font-mono text-amber-400 w-6 text-right">{node.resonances}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <Share2 className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+            <div className="grow h-1.5 bg-white/5 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-indigo-500 transition-all duration-1000"
+                style={{ width: `${Math.min(100, ((node.connectionsCount || 0) / 10) * 100)}%` }}
+              />
+            </div>
+            <span className="text-[10px] font-mono text-indigo-400 w-6 text-right">{node.connectionsCount || 0}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <ArrowUpRight className={`w-3.5 h-3.5 shrink-0 ${node.trajectory === 'growing' ? 'text-teal-500' : 'text-slate-500'}`} />
+            <span className="text-[10px] font-mono uppercase font-bold text-slate-300">
+              {language === 'ru' ? 'Рост' : 'Growth'}
+              <span className={`ml-2 ${node.trajectory === 'growing' ? 'text-teal-400' : 'text-slate-500'}`}>
+                {node.trajectory === 'growing' ? '↑' : node.trajectory === 'decaying' ? '↓' : '→'}
+              </span>
+            </span>
+          </div>
+        </div>
+
+        <div className="pt-2 border-t border-white/5">
+          <p className="text-[10px] font-mono text-slate-400">
+            <span className="text-indigo-400 font-black">{node.resonances} resonances</span> → {node.status.toUpperCase()}
+          </p>
+        </div>
+      </div>
+
+      {/* 4. RAPID QUICK ACTION PANEL */}
+      <div className="grid grid-cols-4 gap-1.5 bg-black/30 p-1.5 rounded-xl border border-white/5 mt-auto sticky bottom-0 z-10 backdrop-blur-md -mx-1 -mb-1">
         
         {/* ACTION: RESONATE */}
         <button
           onClick={() => onResonate(node.id)}
+          disabled={isResonated}
           id="btn-action-resonate"
           className={`flex flex-col items-center justify-center p-2 rounded-lg transition active:scale-95 cursor-pointer border ${
             isResonated 
               ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' 
               : 'hover:bg-white/5 text-slate-400 hover:text-white border-transparent'
           }`}
+          title={language === 'ru' ? 'Резонанс' : 'Resonate'}
         >
           <Flame className="w-4 h-4 mb-1" />
-          <span className="text-[9px] font-mono font-bold uppercase">{language === 'ru' ? 'Резонанс' : 'Resonate'}</span>
+          <span className="text-[9px] font-mono font-bold uppercase">{node.resonances}</span>
         </button>
 
         {/* ACTION: POCKET */}
@@ -185,9 +237,10 @@ export default function ConceptDetails({
               ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' 
               : 'hover:bg-white/5 text-slate-400 hover:text-white border-transparent'
           }`}
+          title={language === 'ru' ? 'В карман' : 'Pocket'}
         >
           <Pocket className="w-4 h-4 mb-1" />
-          <span className="text-[9px] font-mono font-bold uppercase">{language === 'ru' ? 'В карман' : 'Pocket'}</span>
+          <span className="text-[9px] font-mono font-bold uppercase">{node.carriesCount || 0}</span>
         </button>
 
         {/* ACTION: DEFINE LINK */}
@@ -199,25 +252,21 @@ export default function ConceptDetails({
               ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30' 
               : 'hover:bg-white/5 text-slate-400 hover:text-white border-transparent'
           }`}
+          title={language === 'ru' ? 'Связать' : 'Connect'}
         >
           <Share2 className="w-4 h-4 mb-1" />
-          <span className="text-[9px] font-mono font-bold uppercase">{language === 'ru' ? 'Связать' : 'Connect'}</span>
+          <span className="text-[9px] font-mono font-bold uppercase">{node.connectionsCount || 0}</span>
         </button>
 
-        {/* ACTION: SONIFICATION LISTENING */}
+        {/* ACTION: STORIES / HISTORY */}
         <button
-          onClick={() => playAudio(node.id)}
-          id="btn-action-sonify"
-          className={`flex flex-col items-center justify-center p-2 rounded-lg transition active:scale-95 cursor-pointer border ${
-            isActiveAudio 
-              ? 'bg-amber-500/10 text-amber-400 border-amber-500/40 animate-pulse font-black' 
-              : 'hover:bg-white/5 text-slate-400 hover:text-white border-transparent'
-          }`}
+          onClick={() => {}}
+          id="btn-action-history"
+          className="flex flex-col items-center justify-center p-2 rounded-lg transition active:scale-95 cursor-pointer border border-transparent hover:bg-white/5 text-slate-400 hover:text-white"
+          title={language === 'ru' ? 'История' : 'History'}
         >
-          <Volume2 className="w-4 h-4 mb-1" />
-          <span className="text-[9px] font-mono font-bold uppercase">
-            {isActiveAudio ? (language === 'ru' ? 'Слушаю' : 'Playing') : (language === 'ru' ? 'Слушать' : 'Sonify')}
-          </span>
+          <History className="w-4 h-4 mb-1" />
+          <span className="text-[9px] font-mono font-bold uppercase">{stories.filter(s => s.edgeId ? links.some(l => l.id === s.edgeId && (l.source === node.id || l.target === node.id)) : (s as any).nodeId === node.id).length}</span>
         </button>
       </div>
 
@@ -406,14 +455,19 @@ export default function ConceptDetails({
 
         {/* Stories list */}
         <div className="flex flex-col gap-2 max-h-56 overflow-y-auto custom-scrollbar mb-3 pr-1">
-          {node.stories && node.stories.length > 0 ? (
-            node.stories.map((st) => (
+          {stories.filter(s => s.edgeId ? links.some(l => l.id === s.edgeId && (l.source === node.id || l.target === node.id)) : (s as any).nodeId === node.id).length > 0 ? (
+            stories.filter(s => s.edgeId ? links.some(l => l.id === s.edgeId && (l.source === node.id || l.target === node.id)) : (s as any).nodeId === node.id).map((st) => (
               <div key={st.id} className="p-3 bg-black/40 border border-white/5 rounded-xl text-xs flex flex-col gap-1 shadow-inner leading-relaxed">
                 <div className="flex items-center justify-between font-mono text-[9px] text-slate-500">
                   <span className="font-bold underline text-indigo-400/95">{st.author}</span>
                   <span>{new Date(st.createdAt).toLocaleDateString()}</span>
                 </div>
                 <p className="text-[11.5px] text-slate-200 italic font-sans">{st.text}</p>
+                {st.edgeId && (
+                  <div className="text-[8px] font-mono text-indigo-300 mt-1 uppercase opacity-60">
+                    Linked via connection
+                  </div>
+                )}
               </div>
             ))
           ) : (

@@ -15,6 +15,7 @@ export type LinkType = 'conceptual' | 'historical' | 'practical' | 'resonance' |
 
 export interface Story {
   id: string;
+  edgeId?: string; // New field for edge-bound narratives
   author: string;
   text: string;
   createdAt: number;
@@ -66,6 +67,7 @@ export interface SomaticNode {
   trajectory?: 'growing' | 'stable' | 'decaying';
   score?: number;
   rank?: number;
+  storiesCount?: number;
   audioUrl?: string;
   createdAt?: number;
   stories?: Story[];
