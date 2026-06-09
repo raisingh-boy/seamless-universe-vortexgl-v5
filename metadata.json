@@ -1,0 +1,8 @@
+{
+  "name": "Mycelium 3D Simulation Engine",
+  "description": "An interactive, high-performance 3D WebGL biomorphic engine implementing Craig Reynolds flocking algorithms, flow fields, and dynamic node connections in real-time, now with polished touch-optimized mobile gestures and HUD overlays.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
